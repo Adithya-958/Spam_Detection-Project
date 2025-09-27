@@ -1,0 +1,10 @@
+numpy # Library for linear algebra and math utils
+pandas # Dataframe library
+matplotlib #as plt # Library for plots
+#lazypredict.Supervised  # LazyClassifier
+#warnings
+Scikit-learn
+#sklearn.feature_extraction.text  # TfidfVectorizer
+flask
+flask-cors
+pyYAML
