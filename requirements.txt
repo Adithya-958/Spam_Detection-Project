@@ -1,6 +1,6 @@
-numpy # Library for linear algebra and math utils
-pandas # Dataframe library
-matplotlib #as plt # Library for plots
+numpy
+pandas
+matplotlib
 #lazypredict.Supervised  # LazyClassifier
 #warnings
 Scikit-learn
@@ -8,3 +8,10 @@ Scikit-learn
 flask
 flask-cors
 pyYAML
+types-PyYAML
+ensure
+joblib
+mlflow
+notebook
+python-box
+tqdm

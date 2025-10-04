@@ -23,7 +23,7 @@ list_of_files = [
     "main.py",
     "dockerfile",
     "setup.py",
-    "research/research.ipynd"
+    "research/research.ipynd",
     "templates/index.html"
 ]
 for filepath in list_of_files:
