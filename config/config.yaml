@@ -5,3 +5,8 @@ data_ingestion:
   source_URL: https://github.com/Adithya-958/2000spam-ham-labeleddataset-hindi/raw/refs/heads/main/Spam_or_ham_workingset.zip
   local_data_file: artifacts/data_ingestion/data.zip
   unzip_dir: artifacts/data_ingestion
+
+data_validation:
+  root_dir: artifacts/data_validation
+  unzip_path: artifacts/data_ingestion/Spam_or_ham_workingset.csv
+  status: artifacts/data_validation/status.txt

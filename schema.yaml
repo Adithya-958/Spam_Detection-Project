@@ -1,1 +1,6 @@
-Key1: value
+COLUMNS:
+  Message: object
+  Category: object
+
+Target_Column:
+  name: Category
