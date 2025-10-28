@@ -28,3 +28,11 @@ class ModelTrainerConfig:
     # alpha: float
     # l1_ratio: float #elastic net algorithm
     target_col: str
+@dataclass
+class ModelEvaluateConfig:
+  root_dir: Path
+  test_data_path: Path
+  model_path: Path
+  metric_file_name: str
+  target_col: str
+  MLflow_url: str

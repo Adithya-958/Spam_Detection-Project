@@ -1,6 +1,6 @@
 from src.Spam_Detection_Project.constants import *
 from src.Spam_Detection_Project.utils.common import read_yaml, create_directories
-from src.Spam_Detection_Project.entity.config_entity import (DataIngestionConfig,DataValidationConfig,DataTransformationConfig,ModelTrainerConfig)
+from src.Spam_Detection_Project.entity.config_entity import (DataIngestionConfig,DataValidationConfig,DataTransformationConfig,ModelTrainerConfig,ModelEvaluateConfig)
 class ConfigurationManager:
     def __init__(self,config_filepath=CONFIG_FILE_PATH,params_filepath = PARAMS_FILE_PATH,
                  schema_filepath = SCHEMA_FILE_PATH):
@@ -58,3 +58,20 @@ class ConfigurationManager:
             target_col= schema.name,
         )
         return model_trainer_config
+    
+    def get_model_evaluate_config(self) -> ModelEvaluateConfig:
+        config = self .config.model_evaluation #config.yaml file
+        #params = self.params.key
+        schema = self.schema.Target_Column
+        create_directories([config.root_dir])
+        model_evaluate_config = ModelEvaluateConfig(
+            root_dir = config.root_dir,
+            test_data_path= config.test_data_path,
+            model_path = config.model_path,
+            metric_file_name = config.metric_file_name,
+            # alpha= params.alpha,
+            # l1_ratio=params.l1_ratio,
+            target_col= schema.name,
+            MLflow_url = "https://dagshub.com/Adithya-958/Spam_Detection-Project.mlflow"
+        )
+        return model_evaluate_config
