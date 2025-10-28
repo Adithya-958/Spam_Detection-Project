@@ -1,1 +1,6 @@
-Key1: valu
+# # linear regression 26-10-2025
+# ElasticNet:
+#   alpha: 0.2
+#   l1_ratio: 0.1
+# # introduce classification:
+key1: value1

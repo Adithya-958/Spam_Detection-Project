@@ -1,6 +1,15 @@
 COLUMNS:
   Message: object
   Category: object
-
+  contains_phone_number: int64
+  contains_URL_link: int64
+  Keywords: int64
+  Special_Characters : int64
+  Amount: int64
+  Length: int64
+  SMS_Number: int64
+  word_count: int64
+  label_numeric: int64
+  
 Target_Column:
-  name: Category
+  name: label_numeric

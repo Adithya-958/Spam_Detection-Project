@@ -11,9 +11,8 @@ class DataTransformationPipeline:
 
     def initiate_data_transformation(self):
         try:
-            with open(Path(r"artifacts\data_validation\status.txt"),'r') as f:
-                status = f.read().strip().split(" ")[-1]
-                print(status)
+            with open(Path(r"C:\Udemy_proj\new_proj\Spam_Detection_Project\artifacts\data_validation\status.txt"),'r') as f:
+                status = f.read().split(" ")[-1]
             if(status == "True"):
                 config=ConfigurationManager()
                 data_transformation_config=config.get_data_transformation_config()

@@ -7,7 +7,7 @@ from src.Spam_Detection_Project.entity.config_entity import (DataValidationConfi
 class DataValidation:
     def __init__(self, config: DataValidationConfig):
         self.config = config
-
+        
     def validate_all_columns(self)-> bool:
         try:
             validation_status = None
