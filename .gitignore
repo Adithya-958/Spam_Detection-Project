@@ -1,4 +1,9 @@
-\myvenv
-\logs
-\artifacts
-\research
+# Virtual environment
+myvenv/
+
+# Logs and artifacts
+logs/
+artifacts/
+
+# Research notebooks and outputs (ignore entire research folder)
+research/
