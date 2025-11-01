@@ -7,9 +7,7 @@ from src.Spam_Detection_Project.entity.config_entity import (ModelEvaluateConfig
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import joblib
 from src.Spam_Detection_Project.utils.common import save_json
-os.environ['MLFLOW_TRACKING_URI'] = 'https://dagshub.com/Adithya-958/Spam_Detection-Project.mlflow'
-os.environ['MLFLOW_TRACKING_PASSWORD'] = 'e6ba2a279a0155bf190277ab492ed72cca375191'
-os.environ['MLFLOW_TRACKING_USERNAME'] = 'Adithya-958'
+
 class ModelEvaluate:
     def __init__(self, config: ModelEvaluateConfig):
         self.config = config
