@@ -2,7 +2,6 @@ from src.Spam_Detection_Project.config.configuration import ConfigurationManager
 from src.Spam_Detection_Project.components.model_trainer import ModelTrainer
 from src.Spam_Detection_Project import logger
 
-
 STAGE_NAME="Model Training stage"
 
 class ModelTrainerPipeline:

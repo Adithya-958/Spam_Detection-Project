@@ -7,7 +7,15 @@ from src.Spam_Detection_Project.entity.config_entity import (ModelEvaluateConfig
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 import joblib
 from src.Spam_Detection_Project.utils.common import save_json
-
+from dotenv import load_dotenv
+# Load credentials from dotenv/keys.env (do not hard-code secrets in source)
+# parents[3] points to the repository root when this file lives under src/Spam_Detection_Project/components
+dotenv_path = Path(__file__).resolve().parents[3] / "dotenv" / "keys.env"
+if dotenv_path.exists():
+    load_dotenv(dotenv_path)
+else:
+    # fallback to default .env behavior
+    load_dotenv()
 class ModelEvaluate:
     def __init__(self, config: ModelEvaluateConfig):
         self.config = config
@@ -20,17 +28,16 @@ class ModelEvaluate:
         return accuracy, precession, recall, f1
     
     def log_into_mlflow(self):
-
         test_data = pd.read_csv(self.config.test_data_path)
         model = joblib.load(self.config.model_path)
         columns_to_drop = [self.config.target_col, test_data.columns[0], test_data.columns[1]]
         test_x = test_data.drop(columns_to_drop, axis=1)
         test_y = test_data[self.config.target_col]
 
-
-        mlflow.set_registry_uri(self.config.MLflow_url)
+        mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI") or getattr(self.config, "MLflow_url", None)
+        if mlflow_uri:
+            mlflow.set_tracking_uri(mlflow_uri)
         tracking_url_type_store = urlparse(mlflow.get_tracking_uri()).scheme
-
         with mlflow.start_run():
             predicted_qualities = model.predict(test_x)
             (accuracy, precession, recall, f1) = self.EvaluationMatrix(test_y, predicted_qualities)
@@ -52,7 +59,10 @@ class ModelEvaluate:
                 # There are other ways to use the Model Registry, which depends on the use case,
                 # please refer to the doc for more information:
                 # https://mlflow.org/docs/latest/model-registry.html#api-workflow
-                mlflow.sklearn.log_model(model, "model", registered_model_name="ElasticnetModel")
+                mlflow.sklearn.log_model(model, "model", registered_model_name="Model_V0")
             else:
                 mlflow.sklearn.log_model(model, "model")
+
+
+
         
