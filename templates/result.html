@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Prediction result</title>
+		<style>
+			body { font-family: Arial, Helvetica, sans-serif;  }
+			
+			.spam { color: #c92a2a; }
+			.ham { color: #2a9d2a; }
+			.meta { color: #666; font-size: 0.9rem; }
+		</style>
+	</head>
+	<body>
+		<div class="card" role="main" aria-live="polite">
+			{% if error %}
+				<h2>Error</h2>
+				<p class="meta">{{ error }}</p>
+				<p><a href="/">Go back</a></p>
+			{% else %}
+				<h2>Prediction result</h2>
+				<section>
+					<dl>
+						<dt>Message</dt>
+						<dd><pre style="white-space:pre-wrap;">{{ message }}</pre></dd>
+						<dt>Label</dt>
+						<dd><strong class="{{ 'spam' if label=='spam' else 'ham' }}">{{ label|upper }}</strong></dd>
+						<dt>Confidence</dt>
+					</dl>
+				</section>
+				<p class="meta">Note: Confidence is approximate and depends on the trained model.</p>
+				<p><a href="/">Try another message</a></p>
+			{% endif %}
+		</div>
+	</body>
+	</html>

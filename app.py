@@ -1,134 +1,239 @@
-#basic front end
-from flask import Flask, render_template, request
+# basic front end
+from flask import Flask, render_template, request, redirect, url_for
 import os
-import json
+import subprocess
 import joblib
-import numpy as np
+import re
+import pandas as pd
 from typing import Optional
-
-from src.Spam_Detection_Project.utils.feature_engineering import compute_features, feature_columns
-
-
+from datetime import datetime
+import logging
 app = Flask(__name__)
 
+# Configure a simple file logger for predictions and training
 
-def _find_and_load_model() -> Optional[object]:
-    """Try to find a model artifact in common locations and load it with joblib.
+logging.basicConfig(
+    filename='logs/app_activity.log',
+    level=logging.INFO,
+    format='%(asctime)s | %(levelname)s | %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
-    Returns the loaded model or None if not found.
-    """
-    candidates = [
-        os.path.join("artifacts", "model", "model.joblib"),
-        os.path.join("artifacts", "model", "full_pipeline.joblib"),
-        os.path.join("src", "Spam_Detection_Project", "artifacts", "model_trainer", "model.joblib"),
+# ----- Helper to get client IP -----
+def get_client_ip():
+    """Return the client's IP address, accounting for proxies."""
+    if request.environ.get('HTTP_X_FORWARDED_FOR'):
+        return request.environ.get('HTTP_X_FORWARDED_FOR').split(',')[0].strip()
+    return request.remote_addr or 'UNKNOWN'
+
+# ----- Feature engineering helpers (same as in data_transformation.py) -----
+def _has_phone_number(text: str) -> int:
+    pattern = r"\b[\+]?[0-9][0-9\-]{9,}\b"
+    return int(bool(re.search(pattern, str(text))))
+
+def _has_link(text: str) -> int:
+    pattern = r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+"
+    return int(bool(re.search(pattern, str(text))))
+
+def _keywords(text: str) -> int:
+    keywords = [
+        "मुफ़्त", "दावा", "जीत", "नकद", "प्रस्ताव", "सीमित", "पुरस्कार", "पैसा",
+        "मौका", "लिखकर", "लाख", "stop", "हज़ार", "claim", "free",
+        "urgent", "act now", "winner",
+        'फ्री', 'जल्दी', 'लिमिटेड', 'विजेता', 'इनाम', 'ऑफर', 'कॉल', 'क्लिक', 'लकी',
+        'खरीदें', 'बधाई', 'शीघ्र'
     ]
-    for p in candidates:
-        if os.path.exists(p):
-            try:
-                return joblib.load(p)
-            except Exception:
-                # continue searching
-                pass
-    return None
+    txt = str(text).lower()
+    for kw in keywords:
+        if kw.lower() in txt:
+            return 1
+    return 0
+
+def _special_characters(text: str) -> int:
+    pattern = r"(?:₹|RS|INR|\$)\s*\d+(?:,\d+)*(?:\.\d{2})?|[!@#$%^&*(),.?\":{}|<>]"
+    return int(bool(re.search(pattern, str(text))))
+
+def _cash_amount(text: str) -> int:
+    cash_keywords = ["1 लाख", "दस लाख", "1 हज़ार", "दस हज़ार", "करोड़", "दस करोड़", "मिलियन", "बिलियन", "सौ", "लाख", "हज़ार"]
+    txt = str(text)
+    for c in cash_keywords:
+        if c in txt:
+            return 1
+    return 0
+
+def _length_sms(text: str) -> int:
+    return len(str(text))
+
+def _sms_number(text: str) -> int:
+    pattern = r"\b[5-9]\d{4,5}\b"
+    return int(bool(re.search(pattern, str(text))))
+
+def _word_count(text: str) -> int:
+    return len(str(text).split())
+
+def _compute_features_from_message(message: str) -> pd.DataFrame:
+    """Given a raw message string, compute the same engineered features as training.
+    
+    Returns a DataFrame with one row and all feature columns, ready to pass to model.predict_proba.
+    The order and names match what the trainer expects.
+    """
+    features = {
+        'contains_phone_number': [_has_phone_number(message)],
+        'contains_URL_link': [_has_link(message)],
+        'Keywords': [_keywords(message)],
+        'Special_Characters': [_special_characters(message)],
+        'Amount': [_cash_amount(message)],
+        'Length': [_length_sms(message)],
+        'SMS_Number': [_sms_number(message)],
+        'word_count': [_word_count(message)],
+    }
+    return pd.DataFrame(features)
 
 
-# Load once at startup
-MODEL = _find_and_load_model()
-
+MODEL_PATH = os.path.join("artifacts", "model_trainer", "model.joblib")
+try:
+    MODEL = joblib.load(MODEL_PATH)
+    app.logger.info(f"Loaded model at startup from {MODEL_PATH}")
+except Exception as e:
+    app.logger.info(f"Model not found at startup ({MODEL_PATH}): {e}")
+    MODEL = None
 
 @app.route('/', methods=['GET'])
 def home():
-    return render_template('index.html')
+    """Homepage: display the input form. Show success message if training just completed."""
+    training_status = request.args.get('training_status', None)
+    return render_template('index.html', training_status=training_status)
 
-
-@app.route('/train', methods=['GET'])
+@app.route('/train',methods=['GET'])  # route to train the pipeline
 def training():
-    # Run training synchronously (keeps original behavior).
-    os.system("python main.py")
-    return "Training is successful"
+    """
+    Train the spam detection model.
+    
+    - Runs the full ML pipeline (data ingestion, validation, transformation, training, evaluation).
+    - Saves the trained RandomForest model to artifacts/model_trainer/model.joblib.
+    - Reloads the model into memory for use by /predict.
+    - Logs training start/end with client IP and timestamp.
+    - On success, redirects back to the homepage with a success message.
+    - On failure, returns error with HTTP 500 status.
+    """
+    client_ip = get_client_ip()
+    logging.info(f"TRAIN_START | IP: {client_ip}")
+    
+    # Run training synchronously and reload the model if created
+    try:
+        proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
+    except Exception as e:
+        app.logger.exception(e)
+        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Error: {e}")
+        return "Failed to start training", 500
 
+    if proc.returncode != 0:
+        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Exit code: {proc.returncode}")
+        return f"Training failed (exit code {proc.returncode})", 500
 
-def _model_predict_proba(model, X: np.ndarray) -> Optional[float]:
+    # Attempt to reload the trained model
+    global MODEL
+    try:
+        MODEL = joblib.load(MODEL_PATH) 
+        logging.info(f"TRAIN_SUCCESS | IP: {client_ip} | Model loaded from {MODEL_PATH}")
+        # Redirect back to index with success message as query param
+        return redirect(url_for('home', training_status='success'))
+    except Exception as e:
+        app.logger.exception(e)
+        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Model load failed: {e}")
+        MODEL = None
+        return "Training finished but failed to load model artifact", 500
+
+def _model_predict_proba_for_message(model, message: str) -> Optional[float]:
     try:
         if hasattr(model, "predict_proba"):
-            probs = model.predict_proba(X)
-            # predict_proba returns shape (n_samples, n_classes)
-            # we want a spam probability — training used label 0 for spam, 1 for ham.
+            # The model expects engineered features, not raw strings.
+            # Compute the same features the trainer used.
+            X_features = _compute_features_from_message(message)
+            probs = model.predict_proba(X_features)
+            # find spam class probability; training used label 0 for spam
             if hasattr(model, "classes_"):
                 classes = list(model.classes_)
                 if 0 in classes:
                     idx = classes.index(0)
                     return float(probs[0, idx])
-            # fallback: choose max prob of first column
             return float(probs[0, 0])
-        else:
-            return None
-    except Exception:
+
+        if hasattr(model, "predict"):
+            X_features = _compute_features_from_message(message)
+            pred = model.predict(X_features)[0]
+            return 1.0 if int(pred) == 0 else 0.0
+
+    except Exception as e:
+        app.logger.debug(f"predict_proba failed for raw message: {e}")
         return None
-
-
-def _heuristic_score(features: dict) -> float:
-    # Simple score: each keyword/link/phone/amount adds weight
-    score = 0
-    score += features.get("Keywords", 0) * 2
-    score += features.get("contains_URL_link", 0) * 2
-    score += features.get("contains_phone_number", 0) * 1
-    score += features.get("Special_Characters", 0) * 1
-    score += features.get("Amount", 0) * 1
-    # penalize long messages (less likely spam)
-    if features.get("word_count", 0) > 50:
-        score -= 1
-    # normalize into 0..1 range roughly
-    proba = min(max(score / 5.0, 0.0), 1.0)
-    return proba
+    return None
 
 
 @app.route('/predict', methods=['POST', 'GET'])
-def predict():
-    if request.method == 'GET':
-        return render_template('index.html')
-
-    # POST
-    # Support form POST (index.html) and JSON POST for API clients
-    message = None
-    if request.form and 'message' in request.form:
+def index():
+    """
+    Predict spam/ham classification for a given message.
+    
+    GET: Return the input form (index.html).
+    POST: 
+      1. Extract message from form.
+      2. If no model is loaded, trigger training automatically.
+      3. Compute engineered features from the raw message.
+      4. Call model.predict_proba() to get spam probability.
+      5. Return result (spam/ham + confidence) or error message.
+      6. Log all predictions with client IP, message snippet, and result.
+    """
+    if request.method == 'POST':
         message = request.form.get('message', '').strip()
-    else:
+        client_ip = get_client_ip()
+        message_snippet = (message[:50] + '...') if len(message) > 50 else message
+        
+        if not message:
+            logging.warning(f"PREDICT_EMPTY | IP: {client_ip} | Empty message submitted")
+            return render_template('index.html')
+
+        # If model not loaded yet, run training to produce the artifact and reload
+        global MODEL
+        if MODEL is None:
+            logging.info(f"PREDICT_NO_MODEL | IP: {client_ip} | Auto-triggering training")
+            try:
+                proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
+            except Exception as e:
+                app.logger.exception(e)
+                logging.error(f"PREDICT_TRAIN_FAILED | IP: {client_ip} | Error: {e}")
+                return render_template('result.html', error='Failed to start training')
+
+            if proc.returncode != 0:
+                logging.error(f"PREDICT_TRAIN_FAILED | IP: {client_ip} | Exit code: {proc.returncode}")
+                return render_template('result.html', error=f'Training failed (exit {proc.returncode})')
+
+            try:
+                MODEL = joblib.load(MODEL_PATH)
+                logging.info(f"PREDICT_MODEL_LOADED | IP: {client_ip} | After training")
+            except Exception as e:
+                app.logger.exception(e)
+                logging.error(f"PREDICT_MODEL_LOAD_FAILED | IP: {client_ip} | Error: {e}")
+                return render_template('result.html', error='Training finished but model could not be loaded')
+
+        # At this point MODEL should be available
         try:
-            body = request.get_json(silent=True)
-            if body and 'message' in body:
-                message = str(body['message']).strip()
-        except Exception:
-            message = None
+            proba = _model_predict_proba_for_message(MODEL, message)
+        except Exception as e:
+            app.logger.exception(e)
+            logging.error(f"PREDICT_ERROR | IP: {client_ip} | Message: '{message_snippet}' | Error: {e}")
+            proba = None
 
-    if not message:
-        return render_template('result.html', error='Please provide a message to classify')
+        if proba is None:
+            logging.error(f"PREDICT_FAILED | IP: {client_ip} | Message: '{message_snippet}' | Proba is None")
+            return render_template('result.html', error='Prediction failed; model may expect engineered features')
 
-    # Compute handcrafted features
-    feats = compute_features(message)
-    cols = feature_columns()
-
-    # If a model is available, try to use it
-    if MODEL is not None:
-        try:
-            X = np.array([[feats[c] for c in cols]])
-            proba = _model_predict_proba(MODEL, X)
-            if proba is None:
-                # fall back to predict()
-                pred = MODEL.predict(X)[0]
-                # map pred to probability-like value
-                proba = 1.0 if int(pred) == 0 else 0.0
-            label = 'spam' if proba > 0.5 else 'ham'
-            return render_template('result.html', label=label, proba=round(float(proba), 4), message=message)
-        except Exception:
-            # fall through to heuristic
-            pass
-
-    # No model — use a heuristic
-    proba = _heuristic_score(feats)
-    label = 'spam' if proba > 0.5 else 'ham'
-    return render_template('result.html', label=label, proba=round(float(proba), 4), message=message)
-
+        label = "spam" if proba >= 0.5 else "ham"
+        logging.info(f"PREDICT_SUCCESS | IP: {client_ip} | Message: '{message_snippet}' | Label: {label} | Confidence: {proba:.4f}")
+        return render_template('result.html', label=label, proba=f"{proba:.4f}", message=message)
+    # GET
+    return render_template('index.html')
+    
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=8080)

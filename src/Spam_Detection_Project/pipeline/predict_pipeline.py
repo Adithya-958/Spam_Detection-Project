@@ -11,6 +11,10 @@ class PredictPipeline:
         """Make predictions on the loaded data using the loaded model."""
         # Assuming the model expects features only, drop non-feature columns if necessary
         # Here we assume the first column is an ID and should be dropped
-        #features = data.drop(columns=[data.columns[0]])
-        predictions = self.model.predict(data)
-        return predictions
+        try:
+            features = data.drop(columns=[data.columns[0]])
+            predictions = self.model.predict(features)
+            return predictions
+        except Exception as e:
+            print(f"Error occurred during prediction: {e}")
+            return None

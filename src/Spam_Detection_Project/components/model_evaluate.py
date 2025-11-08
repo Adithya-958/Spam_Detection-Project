@@ -33,7 +33,6 @@ class ModelEvaluate:
         columns_to_drop = [self.config.target_col, test_data.columns[0], test_data.columns[1]]
         test_x = test_data.drop(columns_to_drop, axis=1)
         test_y = test_data[self.config.target_col]
-
         mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI") or getattr(self.config, "MLflow_url", None)
         if mlflow_uri:
             mlflow.set_tracking_uri(mlflow_uri)
@@ -44,15 +43,11 @@ class ModelEvaluate:
             # Saving metrics as local
             scores = {"accuracy":accuracy, "precession":precession, "recall":recall, "f1":f1}
             save_json(path=Path(self.config.metric_file_name), data=scores)
-
             #mlflow.log_params(self.config.all_params)
-
             mlflow.log_metric("accuracy",accuracy)
             mlflow.log_metric("precession",precession)
             mlflow.log_metric("recall",recall)
             mlflow.log_metric("f1",f1)
-
-
             # Model registry does not work with file store
             if tracking_url_type_store != "file":
                 # Register the model
