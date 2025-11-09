@@ -1,31 +1,73 @@
 # basic front end
-from flask import Flask, render_template, request, redirect, url_for
+from flask import Flask, render_template, request
 import os
 import subprocess
 import joblib
 import re
 import pandas as pd
 from typing import Optional
-from datetime import datetime
 import logging
+
 app = Flask(__name__)
+def setup_logging():
+    # Create logs directory
+    os.makedirs('logs', exist_ok=True)
 
-# Configure a simple file logger for predictions and training
+    # Remove all handlers associated with the root logger object
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
 
-logging.basicConfig(
-    filename='logs/app_activity.log',
-    level=logging.INFO,
-    format='%(asctime)s | %(levelname)s | %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
+    # Configure the root logger with console and file handlers
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s | %(levelname)s | %(name)s | %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S',
+        handlers=[
+            logging.StreamHandler(),
+            logging.FileHandler('logs/app_activity.log')
+        ]
+    )
 
-# ----- Helper to get client IP -----
-def get_client_ip():
-    """Return the client's IP address, accounting for proxies."""
-    if request.environ.get('HTTP_X_FORWARDED_FOR'):
-        return request.environ.get('HTTP_X_FORWARDED_FOR').split(',')[0].strip()
-    return request.remote_addr or 'UNKNOWN'
 
+# initialize logging before routes
+setup_logging()
+
+
+def _get_user_ip():
+    """Return a best-effort client IP for the current request context."""
+    try:
+        # prefer X-Forwarded-For if behind a proxy
+        forwarded = request.headers.get('X-Forwarded-For', None)
+        if forwarded:
+            # X-Forwarded-For can be a comma-separated list
+            return forwarded.split(',')[0].strip()
+    except Exception:
+        pass
+    return request.remote_addr or 'unknown'
+
+
+def get_user_logger(user_ip: str):
+    """Return a per-user logger that writes to logs/user_<ip>.log.
+
+    Reuses the logger if already configured to avoid duplicate handlers.
+    """
+    # sanitize ip for filename
+    safe_ip = user_ip.replace(':', '_').replace('.', '_')
+    logger_name = f"user_{safe_ip}"
+    logger = logging.getLogger(logger_name)
+    if logger.handlers:
+        return logger
+
+    # create file handler for this user
+    user_log_dir = os.path.join('logs')
+    os.makedirs(user_log_dir, exist_ok=True)
+    fh = logging.FileHandler(os.path.join(user_log_dir, f"{logger_name}.log"))
+    fh.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(asctime)s | %(levelname)s | %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+    fh.setFormatter(formatter)
+    logger.addHandler(fh)
+    logger.setLevel(logging.INFO)
+    return logger
 # ----- Feature engineering helpers (same as in data_transformation.py) -----
 def _has_phone_number(text: str) -> int:
     pattern = r"\b[\+]?[0-9][0-9\-]{9,}\b"
@@ -100,47 +142,34 @@ except Exception as e:
 
 @app.route('/', methods=['GET'])
 def home():
-    """Homepage: display the input form. Show success message if training just completed."""
-    training_status = request.args.get('training_status', None)
-    return render_template('index.html', training_status=training_status)
+    return render_template('index.html')
 
 @app.route('/train',methods=['GET'])  # route to train the pipeline
 def training():
-    """
-    Train the spam detection model.
-    
-    - Runs the full ML pipeline (data ingestion, validation, transformation, training, evaluation).
-    - Saves the trained RandomForest model to artifacts/model_trainer/model.joblib.
-    - Reloads the model into memory for use by /predict.
-    - Logs training start/end with client IP and timestamp.
-    - On success, redirects back to the homepage with a success message.
-    - On failure, returns error with HTTP 500 status.
-    """
-    client_ip = get_client_ip()
-    logging.info(f"TRAIN_START | IP: {client_ip}")
-    
     # Run training synchronously and reload the model if created
+    user_ip = _get_user_ip()
+    ulog = get_user_logger(user_ip)
+    ulog.info("Training requested by user")
     try:
         proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
     except Exception as e:
         app.logger.exception(e)
-        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Error: {e}")
+        ulog.exception(f"Failed to start training: {e}")
         return "Failed to start training", 500
 
     if proc.returncode != 0:
-        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Exit code: {proc.returncode}")
+        ulog.error(f"Training exited with code {proc.returncode}")
         return f"Training failed (exit code {proc.returncode})", 500
 
     # Attempt to reload the trained model
     global MODEL
     try:
-        MODEL = joblib.load(MODEL_PATH) 
-        logging.info(f"TRAIN_SUCCESS | IP: {client_ip} | Model loaded from {MODEL_PATH}")
-        # Redirect back to index with success message as query param
-        return redirect(url_for('home', training_status='success'))
+        MODEL = joblib.load(MODEL_PATH)
+        ulog.info("Training completed and model loaded")
+        return render_template('index.html', message="Training Successful, model loaded and ready to predict")
     except Exception as e:
         app.logger.exception(e)
-        logging.error(f"TRAIN_FAILED | IP: {client_ip} | Model load failed: {e}")
+        ulog.exception(f"Training finished but failed to load model artifact: {e}")
         MODEL = None
         return "Training finished but failed to load model artifact", 500
 
@@ -172,48 +201,37 @@ def _model_predict_proba_for_message(model, message: str) -> Optional[float]:
 
 @app.route('/predict', methods=['POST', 'GET'])
 def index():
-    """
-    Predict spam/ham classification for a given message.
-    
-    GET: Return the input form (index.html).
-    POST: 
-      1. Extract message from form.
-      2. If no model is loaded, trigger training automatically.
-      3. Compute engineered features from the raw message.
-      4. Call model.predict_proba() to get spam probability.
-      5. Return result (spam/ham + confidence) or error message.
-      6. Log all predictions with client IP, message snippet, and result.
-    """
     if request.method == 'POST':
         message = request.form.get('message', '').strip()
-        client_ip = get_client_ip()
-        message_snippet = (message[:50] + '...') if len(message) > 50 else message
-        
         if not message:
-            logging.warning(f"PREDICT_EMPTY | IP: {client_ip} | Empty message submitted")
             return render_template('index.html')
 
         # If model not loaded yet, run training to produce the artifact and reload
+        # create per-user logger
+        user_ip = _get_user_ip()
+        ulog = get_user_logger(user_ip)
+        ulog.info(f"Prediction requested; message length={len(message)}")
+
         global MODEL
         if MODEL is None:
-            logging.info(f"PREDICT_NO_MODEL | IP: {client_ip} | Auto-triggering training")
+            ulog.info('No model loaded; starting training from /predict')
             try:
                 proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
             except Exception as e:
                 app.logger.exception(e)
-                logging.error(f"PREDICT_TRAIN_FAILED | IP: {client_ip} | Error: {e}")
+                ulog.exception(f"Failed to start training: {e}")
                 return render_template('result.html', error='Failed to start training')
 
             if proc.returncode != 0:
-                logging.error(f"PREDICT_TRAIN_FAILED | IP: {client_ip} | Exit code: {proc.returncode}")
+                ulog.error(f'Training failed (exit {proc.returncode})')
                 return render_template('result.html', error=f'Training failed (exit {proc.returncode})')
 
             try:
                 MODEL = joblib.load(MODEL_PATH)
-                logging.info(f"PREDICT_MODEL_LOADED | IP: {client_ip} | After training")
+                ulog.info('Model loaded after training')
             except Exception as e:
                 app.logger.exception(e)
-                logging.error(f"PREDICT_MODEL_LOAD_FAILED | IP: {client_ip} | Error: {e}")
+                ulog.exception(f"Training finished but model could not be loaded: {e}")
                 return render_template('result.html', error='Training finished but model could not be loaded')
 
         # At this point MODEL should be available
@@ -221,19 +239,26 @@ def index():
             proba = _model_predict_proba_for_message(MODEL, message)
         except Exception as e:
             app.logger.exception(e)
-            logging.error(f"PREDICT_ERROR | IP: {client_ip} | Message: '{message_snippet}' | Error: {e}")
+            ulog.exception(f"Prediction exception: {e}")
             proba = None
 
         if proba is None:
-            logging.error(f"PREDICT_FAILED | IP: {client_ip} | Message: '{message_snippet}' | Proba is None")
+            ulog.warning('Prediction failed for message')
             return render_template('result.html', error='Prediction failed; model may expect engineered features')
 
         label = "spam" if proba >= 0.5 else "ham"
-        logging.info(f"PREDICT_SUCCESS | IP: {client_ip} | Message: '{message_snippet}' | Label: {label} | Confidence: {proba:.4f}")
+        ulog.info(f"Prediction result: label={label}, proba={proba:.4f}")
         return render_template('result.html', label=label, proba=f"{proba:.4f}", message=message)
     # GET
     return render_template('index.html')
     
 
+# ... all your routes and functions ...
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8080)
+    try:
+        print("Attempting to start Flask server...")
+        app.run(host='0.0.0.0', port=8080, debug=False)  # Use debug=True for more info
+    except Exception as e:
+        print(f"Failed to start server: {e}")
+    finally:
+        print("This line should not print until server stops")

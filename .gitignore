@@ -9,10 +9,7 @@ artifacts/
 research/
 scripts/
 # dotenv keys file (keep secret)
-
-DOTENV/
+.env
+dotenv/
 templates/index.html
 templates/results.html
-app_documentation.md/
-implementation_summary.md/
-QUICK_ANSWERS.md/
