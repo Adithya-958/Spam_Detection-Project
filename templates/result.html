@@ -27,9 +27,16 @@
 						<dt>Label</dt>
 						<dd><strong class="{{ 'spam' if label=='spam' else 'ham' }}">{{ label|upper }}</strong></dd>
 						<dt>Confidence</dt>
+						<dd>{{ proba }}%</dd>
 					</dl>
 				</section>
-				<p class="meta">Note: Confidence is approximate and depends on the trained model.</p>
+				{% if trained_at %}
+				<p class="meta">Model trained at: {{ trained_at }}</p>
+				{% endif %}
+				{% if model_accuracy %}
+				<p class="meta">Model accuracy: {{ model_accuracy }}%</p>
+				{% endif %}
+				<p class="meta">Note: Confidence is based on message features. Model accuracy is from training.</p>
 				<p><a href="/">Try another message</a></p>
 			{% endif %}
 		</div>

@@ -6,7 +6,9 @@ import joblib
 import re
 import pandas as pd
 from typing import Optional
+import json
 import logging
+from datetime import datetime
 
 app = Flask(__name__)
 def setup_logging():
@@ -27,8 +29,6 @@ def setup_logging():
             logging.FileHandler('logs/app_activity.log')
         ]
     )
-
-
 # initialize logging before routes
 setup_logging()
 
@@ -132,13 +132,59 @@ def _compute_features_from_message(message: str) -> pd.DataFrame:
     return pd.DataFrame(features)
 
 
+def _calculate_proba_from_features(features_dict: dict, label: str) -> float:
+    """Calculate confidence as average of feature values.
+    
+    For spam label: higher average = higher spam confidence.
+    For ham label: lower average = higher ham confidence (so we return 100 - avg).
+    """
+    feature_values = list(features_dict.values())
+    avg_features = sum(feature_values) / len(feature_values) if feature_values else 0
+    
+    if label == 'spam':
+        # Higher features -> higher spam confidence
+        proba = min(100, avg_features * 12.5)  # Scale to 0-100
+    else:
+        # Lower features -> higher ham confidence
+        proba = max(0, 100 - avg_features * 12.5)
+    
+    return round(proba, 2)
+
+
 MODEL_PATH = os.path.join("artifacts", "model_trainer", "model.joblib")
+MODEL_TRAINED_AT = None  # Track when model was last trained
+MODEL_ACCURACY = None  # Track model accuracy from training
+# Use the evaluation metrics file produced by the pipeline
+METRICS_FILE = os.path.join("artifacts", "model_evaluation", "metrics.json")
+
+def load_model_accuracy() -> Optional[float]:
+    """Load model accuracy from the pipeline's metrics.json if present.
+
+    Expects JSON with an 'accuracy' key (value between 0 and 1).
+    Returns percentage (0-100) or None on failure.
+    """
+    try:
+        if os.path.exists(METRICS_FILE):
+            with open(METRICS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                if 'accuracy' in data:
+                    acc = float(data['accuracy'])
+                    return round(acc * 100, 2)
+    except Exception as e:
+        app.logger.warning(f"Could not load accuracy from {METRICS_FILE}: {e}")
+    return None
+
+
 try:
     MODEL = joblib.load(MODEL_PATH)
-    app.logger.info(f"Loaded model at startup from {MODEL_PATH}")
+    MODEL_TRAINED_AT = datetime.fromtimestamp(os.path.getmtime(MODEL_PATH)).strftime('%Y-%m-%d %H:%M:%S')
+    MODEL_ACCURACY = load_model_accuracy()
+    app.logger.info(f"Loaded model at startup from {MODEL_PATH} (trained at {MODEL_TRAINED_AT}, accuracy {MODEL_ACCURACY}%)")
 except Exception as e:
     app.logger.info(f"Model not found at startup ({MODEL_PATH}): {e}")
     MODEL = None
+    MODEL_TRAINED_AT = None
+    MODEL_ACCURACY = None
 
 @app.route('/', methods=['GET'])
 def home():
@@ -162,15 +208,19 @@ def training():
         return f"Training failed (exit code {proc.returncode})", 500
 
     # Attempt to reload the trained model
-    global MODEL
+    global MODEL, MODEL_TRAINED_AT, MODEL_ACCURACY
     try:
         MODEL = joblib.load(MODEL_PATH)
+        MODEL_TRAINED_AT = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        MODEL_ACCURACY = load_model_accuracy()
         ulog.info("Training completed and model loaded")
         return render_template('index.html', message="Training Successful, model loaded and ready to predict")
     except Exception as e:
         app.logger.exception(e)
         ulog.exception(f"Training finished but failed to load model artifact: {e}")
         MODEL = None
+        MODEL_TRAINED_AT = None
+        MODEL_ACCURACY = None
         return "Training finished but failed to load model artifact", 500
 
 def _model_predict_proba_for_message(model, message: str) -> Optional[float]:
@@ -206,33 +256,17 @@ def index():
         if not message:
             return render_template('index.html')
 
-        # If model not loaded yet, run training to produce the artifact and reload
         # create per-user logger
         user_ip = _get_user_ip()
         ulog = get_user_logger(user_ip)
         ulog.info(f"Prediction requested; message length={len(message)}")
 
-        global MODEL
+        global MODEL, MODEL_TRAINED_AT
+        
+        # If no model available, show error and tell user to train
         if MODEL is None:
-            ulog.info('No model loaded; starting training from /predict')
-            try:
-                proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
-            except Exception as e:
-                app.logger.exception(e)
-                ulog.exception(f"Failed to start training: {e}")
-                return render_template('result.html', error='Failed to start training')
-
-            if proc.returncode != 0:
-                ulog.error(f'Training failed (exit {proc.returncode})')
-                return render_template('result.html', error=f'Training failed (exit {proc.returncode})')
-
-            try:
-                MODEL = joblib.load(MODEL_PATH)
-                ulog.info('Model loaded after training')
-            except Exception as e:
-                app.logger.exception(e)
-                ulog.exception(f"Training finished but model could not be loaded: {e}")
-                return render_template('result.html', error='Training finished but model could not be loaded')
+            ulog.warning('No model loaded; user needs to train')
+            return render_template('result.html', error='No model available. Please go to <a href="/train">/train</a> to train the model first.')
 
         # At this point MODEL should be available
         try:
@@ -247,8 +281,15 @@ def index():
             return render_template('result.html', error='Prediction failed; model may expect engineered features')
 
         label = "spam" if proba >= 0.5 else "ham"
-        ulog.info(f"Prediction result: label={label}, proba={proba:.4f}")
-        return render_template('result.html', label=label, proba=f"{proba:.4f}", message=message)
+        
+        # Calculate confidence as average of features
+        features_df = _compute_features_from_message(message)
+        features_dict = features_df.iloc[0].to_dict()
+        confidence = _calculate_proba_from_features(features_dict, label)
+        
+        ulog.info(f"Prediction result: label={label}, confidence={confidence}%")
+        return render_template('result.html', label=label, proba=confidence, message=message, 
+                             trained_at=MODEL_TRAINED_AT, model_accuracy=MODEL_ACCURACY)
     # GET
     return render_template('index.html')
     
@@ -260,5 +301,3 @@ if __name__ == '__main__':
         app.run(host='0.0.0.0', port=8080, debug=False)  # Use debug=True for more info
     except Exception as e:
         print(f"Failed to start server: {e}")
-    finally:
-        print("This line should not print until server stops")
