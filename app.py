@@ -197,7 +197,22 @@ def training():
     ulog = get_user_logger(user_ip)
     ulog.info("Training requested by user")
     try:
-        proc = subprocess.run([os.sys.executable, "main.py"], cwd=os.getcwd())
+        # Capture stdout and stderr to see actual error on Heroku
+        proc = subprocess.run(
+            [os.sys.executable, "main.py"],
+            cwd=os.getcwd(),
+            capture_output=True,
+            text=True
+        )
+        
+        # Log the output regardless of exit code
+        if proc.stdout:
+            ulog.info(f"Training stdout: {proc.stdout}")
+            app.logger.info(f"Training stdout: {proc.stdout}")
+        if proc.stderr:
+            ulog.error(f"Training stderr: {proc.stderr}")
+            app.logger.error(f"Training stderr: {proc.stderr}")
+            
     except Exception as e:
         app.logger.exception(e)
         ulog.exception(f"Failed to start training: {e}")
@@ -205,7 +220,8 @@ def training():
 
     if proc.returncode != 0:
         ulog.error(f"Training exited with code {proc.returncode}")
-        return f"Training failed (exit code {proc.returncode})", 500
+        error_msg = f"Training failed (exit code {proc.returncode}). Check logs for details. stderr: {proc.stderr[:500]}"
+        return error_msg, 500
 
     # Attempt to reload the trained model
     global MODEL, MODEL_TRAINED_AT, MODEL_ACCURACY
@@ -266,7 +282,9 @@ def index():
         # If no model available, show error and tell user to train
         if MODEL is None:
             ulog.warning('No model loaded; user needs to train')
-            return render_template('result.html', error='No model available. Please go to <a href="/train">/train</a> to train the model first.')
+            train_url = request.host_url.rstrip('/') + '/train'
+            error_msg = f'No model available. Please go to <a href="{train_url}">{train_url}</a> to train the model first.'
+            return render_template('result.html', error=error_msg)
 
         # At this point MODEL should be available
         try:
