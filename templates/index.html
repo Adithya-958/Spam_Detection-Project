@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spam Detector</title>
+</head>
+<body>
+    <div>
+        <div>
+            <h1>Spam Detector</h1>
+            <p>Enter your message below to check</p>
+        </div>
+        <form action="/predict" method="post">
+            <div>
+                <textarea name="message" placeholder="Enter your message here..." required></textarea>
+            </div>
+            <div>
+                <button type="submit">Check Message</button>
+                <button type="button" onclick="document.querySelector('textarea[name=message]').value = ''">Clear</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

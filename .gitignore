@@ -11,5 +11,3 @@ scripts/
 # dotenv keys file (keep secret)
 .env
 dotenv/
-templates/index.html
-templates/results.html
