@@ -11,8 +11,10 @@ from src.Spam_Detection_Project.exception.exception import CustomException
 import certifi
 
 MONGO_DB_URL = os.environ.get("MONGO_DB_URL")
+# Do not raise at import time — allow the app to start even if Mongo is not configured.
+# The Spam_Detection_MongoDB class will check and disable DB operations if the URL is missing.
 if not MONGO_DB_URL:
-    raise ValueError("MONGO_DB_URL environment variable not set")
+    logging.warning("MONGO_DB_URL environment variable not set — MongoDB functionality will be disabled until configured.")
 
 ca = certifi.where()
 
@@ -23,6 +25,14 @@ class Spam_Detection_MongoDB:
         self.db_name = db_name
         self.collection_name = collection_name
         try:
+            if not MONGO_DB_URL:
+                # Graceful degradation: don't attempt to connect when URL is missing
+                self.client = None
+                self.db = None
+                self.collection = None
+                self.logger.warning("MONGO_DB_URL not provided; MongoDB client not initialized.")
+                return
+
             self.client = pymongo.MongoClient(MONGO_DB_URL, tlsCAFile=ca)
             self.db = self.client.get_database(db_name)
             self.collection = self.db.get_collection(collection_name)
@@ -33,6 +43,10 @@ class Spam_Detection_MongoDB:
 
     def insert_prediction(self, data: dict):
         try:
+            if self.collection is None:
+                self.logger.warning("insert_prediction called but MongoDB is not configured. Skipping insert.")
+                return None
+
             data['timestamp'] = datetime.utcnow()
             result = self.collection.insert_one(data)
             self.logger.info(f"Inserted document with id: {result.inserted_id}")
@@ -43,6 +57,10 @@ class Spam_Detection_MongoDB:
 
     def fetch_predictions(self, query: dict):
         try:
+            if self.collection is None:
+                self.logger.warning("fetch_predictions called but MongoDB is not configured. Returning empty list.")
+                return []
+
             results = self.collection.find(query)
             return list(results)
         except Exception as e:
@@ -78,11 +96,15 @@ class Spam_Detection_MongoDB:
                 self.logger.warning("No records to insert")
                 return []
             
+            if self.collection is None:
+                self.logger.warning("insert_many_records called but MongoDB is not configured. Skipping insert.")
+                return []
+
             if add_timestamp:
                 for record in records:
                     if 'timestamp' not in record:
                         record['timestamp'] = datetime.utcnow()
-            
+
             result = self.collection.insert_many(records)
             self.logger.info(f"Inserted {len(result.inserted_ids)} documents successfully")
             return result.inserted_ids

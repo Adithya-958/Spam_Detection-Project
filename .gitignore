@@ -3,7 +3,7 @@ myvenv/
 
 # Logs and artifacts
 logs/
-
+test_mongo_db.py/
 # Research notebooks and outputs (ignore entire research folder)
 research/
 scripts/
