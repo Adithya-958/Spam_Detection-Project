@@ -38,6 +38,19 @@
 				{% endif %}
 				<p class="meta">Note: Confidence is based on message features. Model accuracy is from training.</p>
 				<p><a href="/">Try another message</a></p>
+				{% if doc_id %}
+					<hr />
+					<h3>Was this prediction correct?</h3>
+					<form method="post" action="/confirm">
+						<input type="hidden" name="doc_id" value="{{ doc_id }}" />
+						<label for="confirmed_label">Correct label:</label>
+						<select name="confirmed_label" id="confirmed_label">
+							<option value="spam" {% if label=='spam' %}selected{% endif %}>Spam</option>
+							<option value="ham" {% if label=='ham' %}selected{% endif %}>Ham</option>
+						</select>
+						<button type="submit">Submit feedback</button>
+					</form>
+				{% endif %}
 			{% endif %}
 		</div>
 	</body>

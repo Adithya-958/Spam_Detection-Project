@@ -1,6 +1,6 @@
 from src.Spam_Detection_Project.config.configuration import ConfigurationManager
 from src.Spam_Detection_Project.components.model_evaluate import ModelEvaluate
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 
 
 STAGE_NAME="Model Evaluation stage"

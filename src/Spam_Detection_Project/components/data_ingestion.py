@@ -1,6 +1,6 @@
 import os
 import urllib.request as request
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 import zipfile
 from src.Spam_Detection_Project.entity.config_entity import (DataIngestionConfig)
 ## component-Data Ingestion

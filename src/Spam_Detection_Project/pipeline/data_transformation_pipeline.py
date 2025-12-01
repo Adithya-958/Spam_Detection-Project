@@ -1,6 +1,6 @@
 from src.Spam_Detection_Project.config.configuration import ConfigurationManager
 from src.Spam_Detection_Project.components.data_transformation import DataTransformation
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 from pathlib import Path
 
 STAGE_NAME="Data Transformation Stage"

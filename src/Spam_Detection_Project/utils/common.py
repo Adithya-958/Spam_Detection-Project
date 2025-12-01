@@ -1,6 +1,6 @@
 import os
 import yaml
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 import json
 import joblib
 from ensure import ensure_annotations

@@ -10,6 +10,11 @@ import json
 import logging
 from datetime import datetime
 
+from push_mongoDB import Spam_Detection_MongoDB
+from bson.objectid import ObjectId
+import certifi
+from pymongo import MongoClient
+
 app = Flask(__name__)
 def setup_logging():
     # Create logs directory
@@ -186,6 +191,16 @@ except Exception as e:
     MODEL_TRAINED_AT = None
     MODEL_ACCURACY = None
 
+# Initialize Mongo connection for recording predictions (optional)
+MONGO_CLIENT = None
+try:
+    # Attempt to create the helper class; if MONGO_DB_URL not set this will raise
+    MONGO_CLIENT = Spam_Detection_MongoDB(logger=app.logger)
+    app.logger.info("MongoDB helper initialized")
+except Exception as e:
+    app.logger.info(f"MongoDB not initialized (missing config or connection error): {e}")
+    MONGO_CLIENT = None
+
 @app.route('/', methods=['GET'])
 def home():
     return render_template('index.html')
@@ -271,7 +286,7 @@ def index():
         message = request.form.get('message', '').strip()
         if not message:
             return render_template('index.html')
-
+        
         # create per-user logger
         user_ip = _get_user_ip()
         ulog = get_user_logger(user_ip)
@@ -304,12 +319,71 @@ def index():
         features_df = _compute_features_from_message(message)
         features_dict = features_df.iloc[0].to_dict()
         confidence = _calculate_proba_from_features(features_dict, label)
-        
+
+        # Save prediction record to MongoDB (if available) and return the inserted document id
+        inserted_id = None
+        if MONGO_CLIENT is not None:
+            try:
+                doc = {
+                    'message': message,
+                    'features': features_dict,
+                    'predicted_label': label,
+                    'predicted_proba': float(proba) if isinstance(proba, (float, int)) else None,
+                    'model_version': MODEL_TRAINED_AT,
+                    'user_ip': user_ip,
+                    'source': 'web'
+                }
+                inserted_id = MONGO_CLIENT.insert_prediction(doc)
+                ulog.info(f"Saved prediction to MongoDB: {inserted_id}")
+            except Exception as e:
+                ulog.exception(f"Failed to save prediction to MongoDB: {e}")
+
         ulog.info(f"Prediction result: label={label}, confidence={confidence}%")
         return render_template('result.html', label=label, proba=confidence, message=message, 
-                             trained_at=MODEL_TRAINED_AT, model_accuracy=MODEL_ACCURACY)
+                             trained_at=MODEL_TRAINED_AT, model_accuracy=MODEL_ACCURACY, doc_id=str(inserted_id) if inserted_id else None)
     # GET
     return render_template('index.html')
+
+
+@app.route('/confirm', methods=['POST'])
+def confirm():
+    """Endpoint to receive user feedback for a prediction.
+
+    Expects form data: `doc_id` (Mongo document id) and `confirmed_label` ('spam'|'ham').
+    """
+    doc_id = request.form.get('doc_id')
+    confirmed_label = request.form.get('confirmed_label')
+    user_ip = _get_user_ip()
+    ulog = get_user_logger(user_ip)
+
+    if not doc_id or not confirmed_label:
+        ulog.warning('Invalid confirm request: missing doc_id or confirmed_label')
+        return render_template('result.html', error='Invalid confirmation request'), 400
+
+    if MONGO_CLIENT is None:
+        ulog.warning('Confirm requested but MongoDB is not configured')
+        return render_template('result.html', error='Feedback cannot be recorded (no DB configured).'), 503
+
+    try:
+        oid = ObjectId(doc_id)
+    except Exception as e:
+        ulog.exception(f'Invalid doc_id provided: {e}')
+        return render_template('result.html', error='Invalid document id provided.'), 400
+
+    try:
+        update = {
+            'confirmed_label': confirmed_label,
+            'confirmed_at': datetime.utcnow()
+        }
+        res = MONGO_CLIENT.collection.update_one({'_id': oid}, {'$set': update})
+        if res.matched_count == 0:
+            ulog.warning(f'No document matched for id {doc_id}')
+            return render_template('result.html', error='No matching record found to update.'), 404
+        ulog.info(f'Updated document {doc_id} with confirmed_label={confirmed_label}')
+        return render_template('result.html', message='Thanks — your feedback was recorded.')
+    except Exception as e:
+        ulog.exception(f'Failed to update feedback: {e}')
+        return render_template('result.html', error='Failed to record feedback; try again later.'), 500
     
 
 # ... all your routes and functions ...

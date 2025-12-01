@@ -1,10 +1,10 @@
 numpy
 pandas
 matplotlib
-#lazypredict.Supervised  # LazyClassifier
+#lazypredict.Supervised  # LazyClassifier
 #warnings
 Scikit-learn
-#sklearn.feature_extraction.text  # TfidfVectorizer
+#sklearn.feature_extraction.text  # TfidfVectorizer
 flask
 flask-cors
 pyYAML
@@ -17,3 +17,11 @@ python-box
 tqdm
 gunicorn
 python-dotenv
+pymongo
+pymongo[srv]==3.12
+certifi
+python-multipart
+fastapi
+dagshub
+uvicorn
+pyaml

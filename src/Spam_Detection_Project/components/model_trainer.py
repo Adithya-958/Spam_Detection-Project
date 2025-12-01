@@ -1,5 +1,5 @@
 import os
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 import pandas as pd
 from src.Spam_Detection_Project.entity.config_entity import (ModelTrainerConfig)
 from sklearn.ensemble import RandomForestClassifier

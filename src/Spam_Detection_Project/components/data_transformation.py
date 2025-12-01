@@ -2,7 +2,7 @@ import os
 import re
 from typing import Optional
 
-from src.Spam_Detection_Project import logger
+from Spam_Detection_Project.logger.logger import logger
 import pandas as pd
 from src.Spam_Detection_Project.entity.config_entity import (DataTransformationConfig)
 from sklearn.model_selection import train_test_split
