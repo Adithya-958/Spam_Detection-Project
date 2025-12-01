@@ -325,6 +325,7 @@ def index():
         if MONGO_CLIENT is not None:
             try:
                 doc = {
+                    
                     'message': message,
                     'features': features_dict,
                     'predicted_label': label,
